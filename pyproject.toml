@@ -1,0 +1,12 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["check_result", "compare", "quantize_int8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
