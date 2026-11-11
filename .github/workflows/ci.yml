@@ -1,0 +1,166 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      record_baselines:
+        description: "Record baselines + docs/RESULTS.md from this run and commit them to main"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tooling
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -q ruff==0.17.4 clang-format==23.1.5
+      - name: ruff (lint + format check)
+        run: |
+          .venv/bin/ruff check python tests/python
+          .venv/bin/ruff format --check python tests/python
+      - name: clang-format check
+        run: .venv/bin/clang-format --dry-run --Werror src/*.hpp src/bench.cpp tests/test_units.cpp
+
+  build-test:
+    name: build-test (${{ matrix.arch }}, sanitizers=${{ matrix.sanitize }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, arch: x64, sanitize: "OFF" }
+          - { os: ubuntu-24.04-arm, arch: arm64, sanitize: "OFF" }
+          - { os: ubuntu-24.04, arch: x64, sanitize: "ON" }
+          - { os: ubuntu-24.04-arm, arch: arm64, sanitize: "ON" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python environment
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -q -r requirements-dev.txt
+      - name: Fetch ONNX Runtime (pinned, checksum-verified)
+        run: scripts/fetch_ort.sh
+      - name: Configure (-Werror, sanitizers=${{ matrix.sanitize }})
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DEIB_SANITIZE=${{ matrix.sanitize }} -DPython3_EXECUTABLE="$PWD/.venv/bin/python"
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: C++ unit + end-to-end tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Python tests
+        run: .venv/bin/python -m pytest -q
+
+  models:
+    # Exported once and shared, so both architectures benchmark byte-identical models.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install CPU-only torch and export tooling
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -q torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/pip install -q -r requirements-export.txt
+      - name: Export EfficientNet-B3 (FP32) to ONNX
+        run: |
+          mkdir -p models
+          .venv/bin/python python/export_model.py --arch efficientnet_b3 --size 300 --out models/fp32.onnx
+      - name: Post-training static INT8 quantization
+        run: .venv/bin/python python/quantize_int8.py --model models/fp32.onnx --out models/int8.onnx --size 300 --samples 32
+      - uses: actions/upload-artifact@v4
+        with:
+          name: models
+          path: models/*.onnx
+          retention-days: 7
+
+  bench:
+    name: bench (${{ matrix.arch }})
+    needs: [build-test, models]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, arch: x64 }
+          - { os: ubuntu-24.04-arm, arch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch ONNX Runtime (pinned, checksum-verified)
+        run: scripts/fetch_ort.sh
+      - name: Build release binary
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DEIB_BUILD_TESTS=OFF
+          cmake --build build -j"$(nproc)"
+      - uses: actions/download-artifact@v4
+        with:
+          name: models
+          path: models
+      - name: Run benchmark suite (FP32 vs INT8, 1/2/4 threads)
+        run: |
+          python3 python/run_suite.py --bench build/edge_bench \
+            --model fp32=models/fp32.onnx --model int8=models/int8.onnx \
+            --threads 1 2 4 --iters 100 --warmup 20 --out results
+      - uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.arch }}
+          path: results
+          retention-days: 30
+
+  report:
+    needs: bench
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write  # only used by the manual 'record' step below
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: results-*
+          merge-multiple: true
+          path: results
+      - name: Report and regression gate
+        shell: bash
+        run: |
+          python3 python/compare.py results --baseline-dir baselines \
+            --summary "$GITHUB_STEP_SUMMARY" | tee report.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: report
+          path: report.md
+          retention-days: 30
+      - name: Record baselines and results (manual runs on main only)
+        if: github.event_name == 'workflow_dispatch' && inputs.record_baselines && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          python3 python/compare.py results --baseline-dir baselines --write-baseline
+          mkdir -p docs
+          {
+            echo "<!-- generated by CI; do not edit by hand -->"
+            echo "Generated by [CI run ${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+            echo "at commit \`${GITHUB_SHA}\` on $(date -u +%Y-%m-%d)."
+            echo
+            cat report.md
+          } > docs/RESULTS.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add baselines docs/RESULTS.md
+          git commit -m "chore: record baselines and results from CI run ${GITHUB_RUN_ID}"
+          git push
