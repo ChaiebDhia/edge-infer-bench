@@ -83,7 +83,7 @@ jobs:
           .venv/bin/python python/export_model.py --arch efficientnet_b3 --size 300 --out models/fp32.onnx
       - name: Post-training static INT8 quantization
         run: .venv/bin/python python/quantize_int8.py --model models/fp32.onnx --out models/int8.onnx --size 300 --samples 32
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: models
           path: models/*.onnx
@@ -117,7 +117,7 @@ jobs:
           python3 python/run_suite.py --bench build/edge_bench \
             --model fp32=models/fp32.onnx --model int8=models/int8.onnx \
             --threads 1 2 4 --iters 100 --warmup 20 --out results
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: results-${{ matrix.arch }}
           path: results
@@ -141,7 +141,7 @@ jobs:
         run: |
           python3 python/compare.py results --baseline-dir baselines \
             --summary "$GITHUB_STEP_SUMMARY" | tee report.md
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: report
           path: report.md
