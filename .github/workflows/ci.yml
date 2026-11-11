@@ -108,7 +108,7 @@ jobs:
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DEIB_BUILD_TESTS=OFF
           cmake --build build -j"$(nproc)"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: models
           path: models
@@ -131,7 +131,7 @@ jobs:
       contents: write  # only used by the manual 'record' step below
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: results-*
           merge-multiple: true
