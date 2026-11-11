@@ -1,0 +1,10 @@
+build*/
+third_party/
+models/
+results/
+report.md
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+compile_commands.json
