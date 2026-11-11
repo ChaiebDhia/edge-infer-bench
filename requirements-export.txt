@@ -1,5 +1,5 @@
 # Installed by the "models" CI job next to a CPU-only torch/torchvision (see ci.yml).
 onnx==1.17.0
-onnxruntime==1.22.0
+onnxruntime==1.31.1
 numpy
 pillow
