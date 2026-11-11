@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install tooling
         run: |
           python3 -m venv .venv
@@ -48,7 +48,7 @@ jobs:
           - { os: ubuntu-24.04, arch: x64, sanitize: "ON" }
           - { os: ubuntu-24.04-arm, arch: arm64, sanitize: "ON" }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Python environment
         run: |
           python3 -m venv .venv
@@ -71,7 +71,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install CPU-only torch and export tooling
         run: |
           python3 -m venv .venv
@@ -101,7 +101,7 @@ jobs:
           - { os: ubuntu-24.04, arch: x64 }
           - { os: ubuntu-24.04-arm, arch: arm64 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Fetch ONNX Runtime (pinned, checksum-verified)
         run: scripts/fetch_ort.sh
       - name: Build release binary
@@ -130,7 +130,7 @@ jobs:
     permissions:
       contents: write  # only used by the manual 'record' step below
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with:
           pattern: results-*
